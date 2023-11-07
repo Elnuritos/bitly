@@ -24,52 +24,73 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.createServer = void 0;
 const http = __importStar(require("http"));
 const url = __importStar(require("url"));
-const uuid_1 = require("uuid");
+const string_decoder_1 = require("string_decoder");
 const shortUrls = {};
+const isValidUrl = (urlString) => {
+    try {
+        new URL(urlString);
+        return true;
+    }
+    catch (err) {
+        return false;
+    }
+};
 const requestHandler = (req, res) => {
     const parsedUrl = url.parse(req.url || '', true);
-    if (parsedUrl.pathname === '/shorten' && req.method === 'POST') {
-        // Обработка сокращения URL
-        let body = '';
-        req.on('data', chunk => {
-            body += chunk;
-        });
-        req.on('end', () => {
+    const decoder = new string_decoder_1.StringDecoder('utf-8');
+    let buffer = '';
+    req.on('data', (data) => {
+        buffer += decoder.write(data);
+    });
+    req.on('end', () => {
+        buffer += decoder.end();
+        if (parsedUrl.pathname === '/shorten' && req.method === 'POST') {
             try {
-                const originalUrl = JSON.parse(body).url;
-                const id = (0, uuid_1.v4)().slice(0, 8);
+                const { url: originalUrl, slug } = JSON.parse(buffer);
+                if (!isValidUrl(originalUrl)) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Invalid URL' }));
+                    return;
+                }
+                const id = slug || Math.random().toString(36).substr(2, 8);
                 shortUrls[id] = originalUrl;
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ shortUrl: `http://localhost:8080/${id}` }));
+                res.end(JSON.stringify({ shortUrl: `http://${req.headers.host}/${id}` }));
             }
             catch (err) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Invalid request' }));
+                res.end(JSON.stringify({ error: 'Invalid request body' }));
             }
-        });
-    }
-    else if (parsedUrl.pathname && parsedUrl.pathname.startsWith('/')) {
-        // Обработка редиректа по короткому URL
-        const id = parsedUrl.pathname.slice(1);
-        const originalUrl = shortUrls[id];
-        if (originalUrl) {
-            res.writeHead(302, { Location: originalUrl });
-            res.end();
+        }
+        else if (parsedUrl.pathname) {
+            const path = parsedUrl.pathname.slice(1);
+            const originalUrl = shortUrls[path];
+            if (originalUrl) {
+                res.writeHead(302, { Location: originalUrl });
+                res.end();
+            }
+            else {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Short URL not found' }));
+            }
         }
         else {
             res.writeHead(404, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Short URL not found' }));
+            res.end(JSON.stringify({ error: 'Endpoint not found' }));
         }
-    }
-    else {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Endpoint not found' }));
-    }
+    });
 };
-const server = http.createServer(requestHandler);
-server.listen(8080, () => {
-    console.log(`Server is running at http://localhost:8080/`);
-});
+const createServer = () => {
+    return http.createServer(requestHandler);
+};
+exports.createServer = createServer;
+if (require.main === module) {
+    const server = (0, exports.createServer)();
+    server.listen(8080, () => {
+        console.log(`Server is running at http://localhost:8080/`);
+    });
+}
 //# sourceMappingURL=server.js.map
